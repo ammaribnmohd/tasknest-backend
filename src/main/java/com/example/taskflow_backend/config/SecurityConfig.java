@@ -4,6 +4,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
@@ -34,6 +35,12 @@ public class SecurityConfig {
 
     private final AppProperties appProperties;
 
+    @Value("${server.servlet.session.cookie.same-site:lax}")
+    private String cookieSameSite;
+
+    @Value("${server.servlet.session.cookie.secure:false}")
+    private boolean cookieSecure;
+
     public SecurityConfig(AppProperties appProperties) {
         this.appProperties = appProperties;
     }
@@ -51,7 +58,8 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         CookieCsrfTokenRepository tokenRepository = CookieCsrfTokenRepository.withHttpOnlyFalse();
-        tokenRepository.setCookieCustomizer(customizer -> customizer.sameSite("Lax").path("/"));
+        tokenRepository.setCookieCustomizer(customizer ->
+                customizer.sameSite(cookieSameSite).secure(cookieSecure).path("/"));
 
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
@@ -113,6 +121,7 @@ public class SecurityConfig {
         }
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
+        config.setExposedHeaders(List.of("X-XSRF-TOKEN"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 
@@ -148,7 +157,8 @@ public class SecurityConfig {
                 throws ServletException, IOException {
             CsrfToken csrfToken = (CsrfToken) request.getAttribute(CsrfToken.class.getName());
             if (csrfToken != null) {
-                csrfToken.getToken();
+                String token = csrfToken.getToken();
+                response.setHeader("X-XSRF-TOKEN", token);
             }
             filterChain.doFilter(request, response);
         }
