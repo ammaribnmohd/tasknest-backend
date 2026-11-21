@@ -7,17 +7,24 @@ import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClient;
+
+import java.util.List;
+import java.util.Map;
 
 @Service
 public class BrevoEmailServiceImpl implements EmailService {
 
     private static final Logger log = LoggerFactory.getLogger(BrevoEmailServiceImpl.class);
+    private static final String BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
 
     private final JavaMailSender mailSender;
     private final AppProperties appProperties;
+    private final RestClient restClient = RestClient.create();
 
     public BrevoEmailServiceImpl(JavaMailSender mailSender, AppProperties appProperties) {
         this.mailSender = mailSender;
@@ -61,18 +68,24 @@ public class BrevoEmailServiceImpl implements EmailService {
     }
 
     private void sendEmail(String toEmail, String subject, String htmlContent, String textContent) {
+        String fromEmail = appProperties.mail().from();
+        String fromName = appProperties.mail().fromName();
+        if (fromEmail == null || fromEmail.isBlank()) {
+            fromEmail = "ammaribn2@gmail.com";
+        }
+        if (fromName == null || fromName.isBlank()) {
+            fromName = "Taskflow";
+        }
+
+        String brevoApiKey = appProperties.mail().brevoApiKey();
+        if (brevoApiKey != null && !brevoApiKey.isBlank()) {
+            sendViaBrevoApi(brevoApiKey.trim(), fromEmail, fromName, toEmail, subject, htmlContent, textContent);
+            return;
+        }
+
         try {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
-
-            String fromEmail = appProperties.mail().from();
-            String fromName = appProperties.mail().fromName();
-            if (fromEmail == null || fromEmail.isBlank()) {
-                fromEmail = "ammaribn2@gmail.com";
-            }
-            if (fromName == null || fromName.isBlank()) {
-                fromName = "Taskflow";
-            }
 
             helper.setFrom(new InternetAddress(fromEmail, fromName));
             helper.setTo(toEmail);
@@ -80,9 +93,42 @@ public class BrevoEmailServiceImpl implements EmailService {
             helper.setText(textContent, htmlContent);
 
             mailSender.send(message);
-            log.info("Sent email successfully to: {}", toEmail);
+            log.info("Sent email via SMTP successfully to: {}", toEmail);
         } catch (Exception ex) {
-            log.error("Failed to send email to {}: {}", toEmail, ex.getMessage(), ex);
+            log.error("Failed to send email via SMTP to {}: {}", toEmail, ex.getMessage(), ex);
+            throw new EmailDeliveryException("Failed to deliver email: " + ex.getMessage(), ex);
+        }
+    }
+
+    private void sendViaBrevoApi(
+            String apiKey,
+            String fromEmail,
+            String fromName,
+            String toEmail,
+            String subject,
+            String htmlContent,
+            String textContent
+    ) {
+        try {
+            Map<String, Object> payload = Map.of(
+                    "sender", Map.of("name", fromName, "email", fromEmail),
+                    "to", List.of(Map.of("email", toEmail)),
+                    "subject", subject,
+                    "htmlContent", htmlContent,
+                    "textContent", textContent
+            );
+
+            restClient.post()
+                    .uri(BREVO_API_URL)
+                    .header("api-key", apiKey)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve()
+                    .toBodilessEntity();
+
+            log.info("Sent email via Brevo HTTPS API successfully to: {}", toEmail);
+        } catch (Exception ex) {
+            log.error("Failed to send email via Brevo HTTPS API to {}: {}", toEmail, ex.getMessage(), ex);
             throw new EmailDeliveryException("Failed to deliver email: " + ex.getMessage(), ex);
         }
     }
