@@ -8,7 +8,11 @@ import java.util.List;
 @ConfigurationProperties(prefix = "app")
 public record AppProperties(Mail mail, Otp otp, Cors cors, RateLimit rateLimit) {
 
-    public record Mail(String from, String fromName, String brevoApiKey) {}
+    public record Mail(String from, String fromName, String brevoApiKey) {
+        public Mail(String from, String fromName) {
+            this(from, fromName, "");
+        }
+    }
 
     public record Otp(int expiryMinutes, int resendCooldownSeconds, int maxAttempts, String hmacSecret) {}
 
